@@ -21,12 +21,15 @@ import org.kurento.client.IceCandidate;
 import org.kurento.client.MediaPipeline;
 import org.kurento.client.PlayerEndpoint;
 import org.kurento.client.WebRtcEndpoint;
+import org.springframework.web.socket.WebSocketSession;
 
 public class UserSession {
 
   private WebRtcEndpoint webRtcEndpoint;
   private MediaPipeline mediaPipeline;
   private PlayerEndpoint playerEndpoint;
+  private String room;
+  private WebSocketSession ws;
 
   public UserSession() {
   }
@@ -60,7 +63,23 @@ public class UserSession {
   }
 
   public void release() {
-    this.playerEndpoint.stop();
-    this.mediaPipeline.release();
+    // this.playerEndpoint.stop();
+    // this.mediaPipeline.release();
+  }
+
+  public String getRoom() {
+    return room;
+  }
+
+  public void setRoom(String room) {
+    this.room = room;
+  }
+
+  public WebSocketSession getWs() {
+    return ws;
+  }
+
+  public void setWs(WebSocketSession ws) {
+    this.ws = ws;
   }
 }

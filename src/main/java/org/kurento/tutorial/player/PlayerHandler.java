@@ -49,36 +49,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
-/**
- * Protocol handler for video player through WebRTC.
- *
- * @author Boni Garcia (bgarcia@gsyc.es)
- * @author David Fernandez (dfernandezlop@gmail.com)
- * @author Ivan Gracia (igracia@kurento.org)
- * @since 6.1.1
- */
-
-class StreamingRoom {
-  public MediaPipeline getMediaPipeline() {
-    return mediaPipeline;
-  }
-
-  public void setMediaPipeline(final MediaPipeline mediaPipeline) {
-    this.mediaPipeline = mediaPipeline;
-  }
-
-  public PlayerEndpoint getPlayerEndpoint() {
-    return playerEndpoint;
-  }
-
-  public void setPlayerEndpoint(final PlayerEndpoint playerEndpoint) {
-    this.playerEndpoint = playerEndpoint;
-  }
-
-  private MediaPipeline mediaPipeline;
-  private PlayerEndpoint playerEndpoint;
-}
-
 public class PlayerHandler extends TextWebSocketHandler {
 
   @Autowired
@@ -154,7 +124,6 @@ public class PlayerHandler extends TextWebSocketHandler {
     PlayerEndpoint playerEndpoint = new PlayerEndpoint.Builder(pipeline, videourl).build();
     
     String uuid = UUID.randomUUID().toString();
-
     StreamingRoom stream = new StreamingRoom();
 
     stream.setMediaPipeline(pipeline);
@@ -241,16 +210,25 @@ public class PlayerHandler extends TextWebSocketHandler {
   }
   
   private void registerToRoom(final WebSocketSession session, JsonObject jsonMessage) {
-    // 1. Media pipeline
     final UserSession user = new UserSession();
 
     String room = jsonMessage.get("roomid").getAsString();
 
+    if (!rooms.containsKey(room)) {
+      sendError(session, "Error, room not found");
+      return;
+    }
+
     final StreamingRoom stream = rooms.get(room);
 
     user.setMediaPipeline(stream.getMediaPipeline());
-
+    users.put(session.getId(), user);
     // User endpoint
+    if (stream.getMediaPipeline()== null) {
+      sendError(session, "Media is closed");
+      return;
+    }
+
     WebRtcEndpoint webRtcEndpoint = new WebRtcEndpoint.Builder(stream.getMediaPipeline()).build();
     webRtcEndpoint.setMaxVideoRecvBandwidth(100000000);
     webRtcEndpoint.setMaxVideoSendBandwidth(100000000);
@@ -258,7 +236,11 @@ public class PlayerHandler extends TextWebSocketHandler {
 
     PlayerEndpoint playerEndpoint = rooms.get(room).getPlayerEndpoint();
 
+    user.setRoom(room);
+
+    user.setWs(session);
     users.put(session.getId(), user);
+    stream.addUser(user);
 
     user.setPlayerEndpoint(playerEndpoint);
 
@@ -338,6 +320,10 @@ public class PlayerHandler extends TextWebSocketHandler {
 
     if (user != null) {
       user.getPlayerEndpoint().pause();
+
+      for (final UserSession us: rooms.get(user.getRoom()).getUserInRoom()) {
+        sendPaused(us.getWs());
+      }
     }
   }
 
@@ -355,6 +341,10 @@ public class PlayerHandler extends TextWebSocketHandler {
       response.addProperty("endSeekable", videoInfo.getSeekableEnd());
       response.addProperty("videoDuration", videoInfo.getDuration());
       sendMessage(session, response.toString());
+
+      for (final UserSession us: rooms.get(user.getRoom()).getUserInRoom()) {
+        sendResumed(us.getWs());
+      }
     }
   }
 
@@ -363,6 +353,7 @@ public class PlayerHandler extends TextWebSocketHandler {
 
     if (user != null) {
       user.release();
+      rooms.get(user.getRoom()).removeUserInRoom(user);
     }
   }
 
@@ -439,13 +430,31 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
-  private void sendError(WebSocketSession session, String message) {
+  public void sendPaused(WebSocketSession session) {
     if (users.containsKey(session.getId())) {
+      System.out.println("paused");
+      JsonObject response = new JsonObject();
+      response.addProperty("id", "paused");
+      sendMessage(session, response.toString());
+    }
+  }
+
+  public void sendResumed(WebSocketSession session) {
+    if (users.containsKey(session.getId())) {
+      System.out.println("resumed");
+      JsonObject response = new JsonObject();
+      response.addProperty("id", "resumed");
+      sendMessage(session, response.toString());
+    }
+  }
+
+  private void sendError(WebSocketSession session, String message) {
+    //if (users.containsKey(session.getId())) {
       JsonObject response = new JsonObject();
       response.addProperty("id", "error");
       response.addProperty("message", message);
       sendMessage(session, response.toString());
-    }
+    //}
   }
 
   private synchronized void sendMessage(WebSocketSession session, String message) {

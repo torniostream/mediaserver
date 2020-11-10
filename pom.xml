@@ -19,7 +19,7 @@
 	<!-- Project configuration -->
 
 	<properties>
-		<demo.port>8443</demo.port>
+		<demo.port>8082</demo.port>
 		<start-class>org.kurento.tutorial.player.PlayerApp</start-class>
 	</properties>
 

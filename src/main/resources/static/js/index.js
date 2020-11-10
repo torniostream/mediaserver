@@ -15,7 +15,7 @@
  *
  */
 
-var ws = new WebSocket('wss://' + location.host + '/player');
+var ws = new WebSocket('ws://' + location.host + '/player');
 var video;
 var webRtcPeer;
 var state = null;
@@ -100,7 +100,8 @@ function start() {
 	var options = {
 		remoteVideo : video,
 		mediaConstraints : userMediaConstraints,
-		onicecandidate : onIceCandidate
+		onicecandidate : onIceCandidate,
+		iceServers : [{url: 'stun:173.194.66.127:19302'}]
 	}
 
 	console.info('User media constraints' + userMediaConstraints);
@@ -126,7 +127,8 @@ function registerToRoom() {
     var options = {
         remoteVideo : video,
         mediaConstraints : userMediaConstraints,
-        onicecandidate : onIceCandidate
+        onicecandidate : onIceCandidate,
+        iceServers : [{url: 'stun:173.194.66.127:19302'}]
     }
 
     console.info('User media constraints' + userMediaConstraints);
