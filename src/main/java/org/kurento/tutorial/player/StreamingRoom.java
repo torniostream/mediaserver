@@ -22,7 +22,7 @@ public class StreamingRoom {
     public StreamingRoom(final KurentoClient kurento, final UserSession userAdmin, final String mediaUri) {
         mediaPipeline = kurento.createMediaPipeline();
         roomDispatcher = new DispatcherOneToMany.Builder(mediaPipeline).build();
-        playerEndpoint = new PlayerEndpoint.Builder(mediaPipeline, mediaUri).useEncodedMedia().build();
+        playerEndpoint = new PlayerEndpoint.Builder(mediaPipeline, mediaUri).build();
 
         HubPort playerHub = new HubPort.Builder(roomDispatcher).build();
         playerEndpoint.connect(playerHub);
