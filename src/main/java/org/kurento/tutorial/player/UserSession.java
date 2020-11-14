@@ -1,37 +1,17 @@
-/*
- * (C) Copyright 2016 Kurento (http://kurento.org/)
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
 package org.kurento.tutorial.player;
 
-import org.kurento.client.IceCandidate;
-import org.kurento.client.MediaPipeline;
-import org.kurento.client.PlayerEndpoint;
-import org.kurento.client.WebRtcEndpoint;
+import org.kurento.client.*;
 import org.springframework.web.socket.WebSocketSession;
 
 public class UserSession {
 
   private WebRtcEndpoint webRtcEndpoint;
-  private MediaPipeline mediaPipeline;
-  private PlayerEndpoint playerEndpoint;
-  private String room;
+  private StreamingRoom room;
   private WebSocketSession ws;
+  private HubPort hubPort;
 
-  public UserSession() {
+  public UserSession(final WebSocketSession ws) {
+    this.ws = ws;
   }
 
   public WebRtcEndpoint getWebRtcEndpoint() {
@@ -42,36 +22,15 @@ public class UserSession {
     this.webRtcEndpoint = webRtcEndpoint;
   }
 
-  public MediaPipeline getMediaPipeline() {
-    return mediaPipeline;
-  }
-
-  public void setMediaPipeline(MediaPipeline mediaPipeline) {
-    this.mediaPipeline = mediaPipeline;
-  }
-
   public void addCandidate(IceCandidate candidate) {
     webRtcEndpoint.addIceCandidate(candidate);
   }
 
-  public PlayerEndpoint getPlayerEndpoint() {
-    return playerEndpoint;
-  }
-
-  public void setPlayerEndpoint(PlayerEndpoint playerEndpoint) {
-    this.playerEndpoint = playerEndpoint;
-  }
-
-  public void release() {
-    // this.playerEndpoint.stop();
-    // this.mediaPipeline.release();
-  }
-
-  public String getRoom() {
+  public StreamingRoom getRoom() {
     return room;
   }
 
-  public void setRoom(String room) {
+  public void setRoom(final StreamingRoom room) {
     this.room = room;
   }
 
@@ -81,5 +40,13 @@ public class UserSession {
 
   public void setWs(WebSocketSession ws) {
     this.ws = ws;
+  }
+
+  public HubPort getHubPort() {
+    return hubPort;
+  }
+
+  public void setHubPort(HubPort hubPort) {
+    this.hubPort = hubPort;
   }
 }

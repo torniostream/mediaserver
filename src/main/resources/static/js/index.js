@@ -274,7 +274,7 @@ function setState(nextState) {
 		enableButton('#registerbu', 'registerToRoom()');
 		disableButton('#pause');
 		disableButton('#stop');
-		disableButton('#debugDot');
+		//disableButton('#debugDot');
 		enableButton('#videourl');
 		enableButton('#roomid');
 		enableButton("[name='mode']");
@@ -295,7 +295,7 @@ function setState(nextState) {
 		disableButton('#start');
 		disableButton('#pause');
 		disableButton('#stop');
-		disableButton('#debugDot');
+		// disableButton('#debugDot');
 		disableButton('#videourl');
 		disableButton('#getPosition');
 		disableButton('#doSeek');

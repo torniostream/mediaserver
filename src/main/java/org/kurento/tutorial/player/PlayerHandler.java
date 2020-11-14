@@ -1,40 +1,10 @@
-/*
- * (C) Copyright 2015 Kurento (http://kurento.org/)
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
 package org.kurento.tutorial.player;
 
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.kurento.client.EndOfStreamEvent;
-import org.kurento.client.ErrorEvent;
-import org.kurento.client.EventListener;
-import org.kurento.client.IceCandidate;
-import org.kurento.client.IceCandidateFoundEvent;
-import org.kurento.client.KurentoClient;
-import org.kurento.client.MediaPipeline;
-import org.kurento.client.MediaState;
-import org.kurento.client.MediaStateChangedEvent;
-import org.kurento.client.PlayerEndpoint;
-import org.kurento.client.ServerManager;
-import org.kurento.client.VideoInfo;
-import org.kurento.client.WebRtcEndpoint;
+import org.kurento.client.*;
 import org.kurento.commons.exception.KurentoException;
 import org.kurento.jsonrpc.JsonUtils;
 import org.slf4j.Logger;
@@ -61,10 +31,10 @@ public class PlayerHandler extends TextWebSocketHandler {
   private final ConcurrentHashMap<String, StreamingRoom> rooms = new ConcurrentHashMap<>();
   
   @Override
-  public void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+  public void handleTextMessage(WebSocketSession session, TextMessage message) {
     JsonObject jsonMessage = gson.fromJson(message.getPayload(), JsonObject.class);
     String sessionId = session.getId();
-    log.debug("Incoming message {} from sessionId", jsonMessage, sessionId);
+    log.debug("Incoming message {} from sessionId {}", jsonMessage, sessionId);
 
     try {
       switch (jsonMessage.get("id").getAsString()) {
@@ -105,60 +75,40 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
+  // This gets called only the first time a room is registered
   private void start(final WebSocketSession session, JsonObject jsonMessage) {
-    // 1. Media pipeline
-    final UserSession user = new UserSession();
-
-    final MediaPipeline pipeline = kurento.createMediaPipeline();
-
-    user.setMediaPipeline(pipeline);
-
-    // User endpoint
-    WebRtcEndpoint webRtcEndpoint = new WebRtcEndpoint.Builder(pipeline).build();
-    webRtcEndpoint.setMaxVideoRecvBandwidth(100000000);
-    webRtcEndpoint.setMaxVideoSendBandwidth(100000000);
-    user.setWebRtcEndpoint(webRtcEndpoint);
+    final UserSession user = new UserSession(session);
 
     String videourl = jsonMessage.get("videourl").getAsString();
     
-    PlayerEndpoint playerEndpoint = new PlayerEndpoint.Builder(pipeline, videourl).build();
-    
     String uuid = UUID.randomUUID().toString();
-    StreamingRoom stream = new StreamingRoom();
+    StreamingRoom stream = new StreamingRoom(kurento, user, videourl);
 
-    stream.setMediaPipeline(pipeline);
-    stream.setPlayerEndpoint(playerEndpoint);
+    System.out.println("code uuid " + uuid);
 
     rooms.put(uuid, stream);
+
     log.info("Codice:\n{}", uuid);
     users.put(session.getId(), user);
 
-    user.setPlayerEndpoint(playerEndpoint);
-    
-    playerEndpoint.connect(webRtcEndpoint);
-
     // 2. WebRtcEndpoint
     // ICE candidates
-    webRtcEndpoint.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
-
-      @Override
-      public void onEvent(IceCandidateFoundEvent event) {
-        JsonObject response = new JsonObject();
-        response.addProperty("id", "iceCandidate");
-        response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
-        try {
-          synchronized (session) {
-            session.sendMessage(new TextMessage(response.toString()));
-          }
-        } catch (IOException e) {
-          log.debug(e.getMessage());
+    user.getWebRtcEndpoint().addIceCandidateFoundListener(event -> {
+      JsonObject response = new JsonObject();
+      response.addProperty("id", "iceCandidate");
+      response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
+      try {
+        synchronized (session) {
+          session.sendMessage(new TextMessage(response.toString()));
         }
+      } catch (IOException e) {
+        log.debug(e.getMessage());
       }
     });
 
     // Continue the SDP Negotiation: Generate an SDP Answer
     String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
-    String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
+    String sdpAnswer = user.getWebRtcEndpoint().processOffer(sdpOffer);
 
     log.info("[Handler::start] SDP Offer from browser to KMS:\n{}", sdpOffer);
     log.info("[Handler::start] SDP Answer from KMS to browser:\n{}", sdpAnswer);
@@ -169,48 +119,39 @@ public class PlayerHandler extends TextWebSocketHandler {
 
     sendMessage(session, response.toString());
 
-    webRtcEndpoint.addMediaStateChangedListener(new EventListener<MediaStateChangedEvent>() {
-      @Override
-      public void onEvent(MediaStateChangedEvent event) {
+    user.getWebRtcEndpoint().addMediaStateChangedListener(event -> {
 
-        if (event.getNewState() == MediaState.CONNECTED) {
-          VideoInfo videoInfo = playerEndpoint.getVideoInfo();
+      if (event.getNewState() == MediaState.CONNECTED) {
+        VideoInfo videoInfo = stream.getPlayerEndpoint().getVideoInfo();
 
-          JsonObject response = new JsonObject();
-          response.addProperty("id", "videoInfo");
-          response.addProperty("isSeekable", videoInfo.getIsSeekable());
-          response.addProperty("initSeekable", videoInfo.getSeekableInit());
-          response.addProperty("endSeekable", videoInfo.getSeekableEnd());
-          response.addProperty("videoDuration", videoInfo.getDuration());
-          sendMessage(session, response.toString());
-        }
+        JsonObject response1 = new JsonObject();
+        response1.addProperty("id", "videoInfo");
+        response1.addProperty("isSeekable", videoInfo.getIsSeekable());
+        response1.addProperty("initSeekable", videoInfo.getSeekableInit());
+        response1.addProperty("endSeekable", videoInfo.getSeekableEnd());
+        response1.addProperty("videoDuration", videoInfo.getDuration());
+        sendMessage(session, response1.toString());
       }
     });
 
-    webRtcEndpoint.gatherCandidates();
+    user.getWebRtcEndpoint().gatherCandidates();
 
     // 3. PlayEndpoint
-    playerEndpoint.addErrorListener(new EventListener<ErrorEvent>() {
-      @Override
-      public void onEvent(ErrorEvent event) {
-        log.info("ErrorEvent: {}", event.getDescription());
-        sendPlayEnd(session);
-      }
+    stream.getPlayerEndpoint().addErrorListener(event -> {
+      log.info("ErrorEvent: {}", event.getDescription());
+      sendPlayEnd(session);
     });
 
-    playerEndpoint.addEndOfStreamListener(new EventListener<EndOfStreamEvent>() {
-      @Override
-      public void onEvent(EndOfStreamEvent event) {
-        log.info("EndOfStreamEvent: {}", event.getTimestamp());
-        sendPlayEnd(session);
-      }
+    stream.getPlayerEndpoint().addEndOfStreamListener(event -> {
+      log.info("EndOfStreamEvent: {}", event.getTimestamp());
+      sendPlayEnd(session);
     });
 
-    playerEndpoint.play();
+    stream.getPlayerEndpoint().play();
   }
   
   private void registerToRoom(final WebSocketSession session, JsonObject jsonMessage) {
-    final UserSession user = new UserSession();
+    final UserSession user = new UserSession(session);
 
     String room = jsonMessage.get("roomid").getAsString();
 
@@ -220,54 +161,28 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
 
     final StreamingRoom stream = rooms.get(room);
-
-    user.setMediaPipeline(stream.getMediaPipeline());
-    users.put(session.getId(), user);
-    // User endpoint
-    if (stream.getMediaPipeline()== null) {
-      sendError(session, "Media is closed");
-      return;
-    }
-
-    WebRtcEndpoint webRtcEndpoint = new WebRtcEndpoint.Builder(stream.getMediaPipeline()).build();
-    webRtcEndpoint.setMaxVideoRecvBandwidth(100000000);
-    webRtcEndpoint.setMaxVideoSendBandwidth(100000000);
-    user.setWebRtcEndpoint(webRtcEndpoint);
-
-    PlayerEndpoint playerEndpoint = rooms.get(room).getPlayerEndpoint();
-
-    user.setRoom(room);
-
-    user.setWs(session);
-    users.put(session.getId(), user);
     stream.addUser(user);
 
-    user.setPlayerEndpoint(playerEndpoint);
-
-    playerEndpoint.connect(webRtcEndpoint);
+    users.put(session.getId(), user);
 
     // 2. WebRtcEndpoint
     // ICE candidates
-    webRtcEndpoint.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
-
-      @Override
-      public void onEvent(IceCandidateFoundEvent event) {
-        JsonObject response = new JsonObject();
-        response.addProperty("id", "iceCandidate");
-        response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
-        try {
-          synchronized (session) {
-            session.sendMessage(new TextMessage(response.toString()));
-          }
-        } catch (IOException e) {
-          log.debug(e.getMessage());
+    user.getWebRtcEndpoint().addIceCandidateFoundListener(event -> {
+      JsonObject response = new JsonObject();
+      response.addProperty("id", "iceCandidate");
+      response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
+      try {
+        synchronized (session) {
+          session.sendMessage(new TextMessage(response.toString()));
         }
+      } catch (IOException e) {
+        log.debug(e.getMessage());
       }
     });
 
     // Continue the SDP Negotiation: Generate an SDP Answer
     String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
-    String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
+    String sdpAnswer = user.getWebRtcEndpoint().processOffer(sdpOffer);
 
     log.info("[Handler::start] SDP Offer from browser to KMS:\n{}", sdpOffer);
     log.info("[Handler::start] SDP Answer from KMS to browser:\n{}", sdpAnswer);
@@ -277,41 +192,32 @@ public class PlayerHandler extends TextWebSocketHandler {
     response.addProperty("sdpAnswer", sdpAnswer);
     sendMessage(session, response.toString());
 
-    webRtcEndpoint.addMediaStateChangedListener(new EventListener<MediaStateChangedEvent>() {
-      @Override
-      public void onEvent(MediaStateChangedEvent event) {
+    user.getWebRtcEndpoint().addMediaStateChangedListener(event -> {
 
-        if (event.getNewState() == MediaState.CONNECTED) {
-          VideoInfo videoInfo = playerEndpoint.getVideoInfo();
+      if (event.getNewState() == MediaState.CONNECTED) {
+        VideoInfo videoInfo = stream.getPlayerEndpoint().getVideoInfo();
 
-          JsonObject response = new JsonObject();
-          response.addProperty("id", "videoInfo");
-          response.addProperty("isSeekable", videoInfo.getIsSeekable());
-          response.addProperty("initSeekable", videoInfo.getSeekableInit());
-          response.addProperty("endSeekable", videoInfo.getSeekableEnd());
-          response.addProperty("videoDuration", videoInfo.getDuration());
-          sendMessage(session, response.toString());
-        }
+        JsonObject response1 = new JsonObject();
+        response1.addProperty("id", "videoInfo");
+        response1.addProperty("isSeekable", videoInfo.getIsSeekable());
+        response1.addProperty("initSeekable", videoInfo.getSeekableInit());
+        response1.addProperty("endSeekable", videoInfo.getSeekableEnd());
+        response1.addProperty("videoDuration", videoInfo.getDuration());
+        sendMessage(session, response1.toString());
       }
     });
 
-    webRtcEndpoint.gatherCandidates();
+    user.getWebRtcEndpoint().gatherCandidates();
 
     // 3. PlayEndpoint
-    playerEndpoint.addErrorListener(new EventListener<ErrorEvent>() {
-      @Override
-      public void onEvent(ErrorEvent event) {
-        log.info("ErrorEvent: {}", event.getDescription());
-        sendPlayEnd(session);
-      }
+    stream.getPlayerEndpoint().addErrorListener(event -> {
+      log.info("ErrorEvent: {}", event.getDescription());
+      sendPlayEnd(session);
     });
 
-    playerEndpoint.addEndOfStreamListener(new EventListener<EndOfStreamEvent>() {
-      @Override
-      public void onEvent(EndOfStreamEvent event) {
-        log.info("EndOfStreamEvent: {}", event.getTimestamp());
-        sendPlayEnd(session);
-      }
+    stream.getPlayerEndpoint().addEndOfStreamListener(event -> {
+      log.info("EndOfStreamEvent: {}", event.getTimestamp());
+      sendPlayEnd(session);
     });
   }
 
@@ -319,11 +225,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     UserSession user = users.get(sessionId);
 
     if (user != null) {
-      user.getPlayerEndpoint().pause();
-
-      for (final UserSession us: rooms.get(user.getRoom()).getUserInRoom()) {
-        sendPaused(us.getWs());
-      }
+      user.getRoom().pause();
     }
   }
 
@@ -331,8 +233,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     UserSession user = users.get(session.getId());
 
     if (user != null) {
-      user.getPlayerEndpoint().play();
-      VideoInfo videoInfo = user.getPlayerEndpoint().getVideoInfo();
+      VideoInfo videoInfo = user.getRoom().getPlayerEndpoint().getVideoInfo();
 
       JsonObject response = new JsonObject();
       response.addProperty("id", "videoInfo");
@@ -341,10 +242,8 @@ public class PlayerHandler extends TextWebSocketHandler {
       response.addProperty("endSeekable", videoInfo.getSeekableEnd());
       response.addProperty("videoDuration", videoInfo.getDuration());
       sendMessage(session, response.toString());
-
-      for (final UserSession us: rooms.get(user.getRoom()).getUserInRoom()) {
-        sendResumed(us.getWs());
-      }
+      
+      user.getRoom().resume();
     }
   }
 
@@ -352,41 +251,48 @@ public class PlayerHandler extends TextWebSocketHandler {
     UserSession user = users.remove(sessionId);
 
     if (user != null) {
-      user.release();
-      rooms.get(user.getRoom()).removeUserInRoom(user);
+      user.getRoom().removeUser(user);
     }
   }
 
   private void debugDot(final WebSocketSession session) {
     UserSession user = users.get(session.getId());
-
     if (user != null) {
-      final String pipelineDot = user.getMediaPipeline().getGstreamerDot();
-      try (PrintWriter out = new PrintWriter("player.dot")) {
-        out.println(pipelineDot);
-      } catch (IOException ex) {
-        log.error("[Handler::debugDot] Exception: {}", ex.getMessage());
-      }
-      final String playerDot = user.getPlayerEndpoint().getElementGstreamerDot();
-      try (PrintWriter out = new PrintWriter("player-decoder.dot")) {
-        out.println(playerDot);
-      } catch (IOException ex) {
-        log.error("[Handler::debugDot] Exception: {}", ex.getMessage());
-      }
+      System.out.println("media trans" + user.getRoom().getPlayerEndpoint().isMediaTranscoding(MediaType.VIDEO));
+      System.out.println("play " + user.getWebRtcEndpoint().isMediaTranscoding(MediaType.VIDEO));
+      System.out.println("pppp " + user.getHubPort().isMediaTranscoding(MediaType.VIDEO));
     }
-
-    ServerManager sm = kurento.getServerManager();
-    log.warn("[Handler::debugDot] CPU COUNT: {}", sm.getCpuCount());
-    log.warn("[Handler::debugDot] CPU USAGE: {}", sm.getUsedCpu(1000));
-    log.warn("[Handler::debugDot] RAM USAGE: {}", sm.getUsedMemory());
   }
+//  private void debugDot(final WebSocketSession session) {
+//    UserSession user = users.get(session.getId());
+//
+//    if (user != null) {
+//      final String pipelineDot = user.getMediaPipeline().getGstreamerDot();
+//      try (PrintWriter out = new PrintWriter("player.dot")) {
+//        out.println(pipelineDot);
+//      } catch (IOException ex) {
+//        log.error("[Handler::debugDot] Exception: {}", ex.getMessage());
+//      }
+//      final String playerDot = user.getPlayerEndpoint().getElementGstreamerDot();
+//      try (PrintWriter out = new PrintWriter("player-decoder.dot")) {
+//        out.println(playerDot);
+//      } catch (IOException ex) {
+//        log.error("[Handler::debugDot] Exception: {}", ex.getMessage());
+//      }
+//    }
+//
+//    ServerManager sm = kurento.getServerManager();
+//    log.warn("[Handler::debugDot] CPU COUNT: {}", sm.getCpuCount());
+//    log.warn("[Handler::debugDot] CPU USAGE: {}", sm.getUsedCpu(1000));
+//    log.warn("[Handler::debugDot] RAM USAGE: {}", sm.getUsedMemory());
+//  }
 
   private void doSeek(final WebSocketSession session, JsonObject jsonMessage) {
     UserSession user = users.get(session.getId());
 
     if (user != null) {
       try {
-        user.getPlayerEndpoint().setPosition(jsonMessage.get("position").getAsLong());
+        user.getRoom().getPlayerEndpoint().setPosition(jsonMessage.get("position").getAsLong());
       } catch (KurentoException e) {
         log.debug("The seek cannot be performed");
         JsonObject response = new JsonObject();
@@ -401,7 +307,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     UserSession user = users.get(session.getId());
 
     if (user != null) {
-      long position = user.getPlayerEndpoint().getPosition();
+      long position = user.getRoom().getPlayerEndpoint().getPosition();
 
       JsonObject response = new JsonObject();
       response.addProperty("id", "position");
@@ -430,24 +336,6 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
-  public void sendPaused(WebSocketSession session) {
-    if (users.containsKey(session.getId())) {
-      System.out.println("paused");
-      JsonObject response = new JsonObject();
-      response.addProperty("id", "paused");
-      sendMessage(session, response.toString());
-    }
-  }
-
-  public void sendResumed(WebSocketSession session) {
-    if (users.containsKey(session.getId())) {
-      System.out.println("resumed");
-      JsonObject response = new JsonObject();
-      response.addProperty("id", "resumed");
-      sendMessage(session, response.toString());
-    }
-  }
-
   private void sendError(WebSocketSession session, String message) {
     //if (users.containsKey(session.getId())) {
       JsonObject response = new JsonObject();
@@ -466,7 +354,7 @@ public class PlayerHandler extends TextWebSocketHandler {
   }
 
   @Override
-  public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
+  public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
     stop(session.getId());
   }
 }
