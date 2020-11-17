@@ -23,15 +23,16 @@ COPY src /usr/src/app/src
 RUN mvn -T 1C install && rm -rf target
 # copy other source files (keep in image)
 RUN mvn -U package
-ENV KMS_ADDR=$KMS_ADDR
-
-ENV KMS_PORT=$KMS_PORT
-
 FROM openjdk:8-jdk-alpine
-WORKDIR /root/
-COPY --from=builder /usr/src/app/target/kurento-player-6.15.0-exec.jar .
-#RUN cp /usr/src/app/target/kurento-player-6.15.0-exec.jar /root
-#CMD echo $KMS_ADDR
 
-CMD ["/bin/sh", "-c", "java -jar -Dkms.url=ws://${KMS_ADDR}:${KMS_PORT}/kurento /root/kurento-player-6.15.0-exec.jar"]
+WORKDIR /root/
+RUN apk add --no-cache bash
+COPY --from=builder /usr/src/app/target/kurento-player-6.15.0-exec.jar .
+ADD https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh /bin/wait-for-it.sh
+RUN chmod +x /bin/wait-for-it.sh
+
+ENV KMS_ADDR $KMS_ADDR
+ENV KMS_PORT $KMS_PORT
+
+CMD ["/bin/sh", "-c", "/bin/wait-for-it.sh ${KMS_ADDR}:${KMS_PORT} -s -t 30 -- java -jar -Dkms.url=ws://${KMS_ADDR}:${KMS_PORT}/kurento /root/kurento-player-6.15.0-exec.jar"]
 
