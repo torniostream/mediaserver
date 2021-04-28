@@ -1,4 +1,4 @@
-FROM openjdk:8-jdk-alpine as builder
+FROM openjdk:16-jdk-alpine as builder
 # ----
 # Install Maven
 RUN apk add --no-cache curl tar bash
@@ -19,11 +19,14 @@ RUN mkdir -p /usr/src/app
 WORKDIR /usr/src/app
 # install maven dependency packages (keep in image)
 COPY pom.xml /usr/src/app
+
+# build the app and download dependencies only when these are new (thanks to the cache)
+RUN --mount=type=cache,target=/root/.m2 mvn dependency:resolve && mvn dependency:resolve-plugins
+
 COPY src /usr/src/app/src
-RUN mvn -T 1C install && rm -rf target
-# copy other source files (keep in image)
-RUN mvn -U package
-FROM openjdk:8-jdk-alpine
+RUN --mount=type=cache,target=/root/.m2 mvn -T 1C install && rm -rf target && mvn -U package
+
+FROM openjdk:16-jdk-alpine
 
 WORKDIR /root/
 RUN apk add --no-cache bash

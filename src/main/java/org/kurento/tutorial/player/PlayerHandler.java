@@ -1,9 +1,10 @@
 package org.kurento.tutorial.player;
 
 import java.io.IOException;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+
+import com.google.gson.JsonElement;
 import org.kurento.client.*;
 import org.kurento.commons.exception.KurentoException;
 import org.kurento.jsonrpc.JsonUtils;
@@ -39,7 +40,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     try {
       switch (jsonMessage.get("id").getAsString()) {
         case "start":
-          start(session, jsonMessage);
+          createRoom(session, jsonMessage);
           break;
         case "stop":
           stop(sessionId);
@@ -48,7 +49,7 @@ public class PlayerHandler extends TextWebSocketHandler {
           pause(sessionId);
           break;
         case "register":
-          registerToRoom(session, jsonMessage);
+          joinRoom(session, jsonMessage);
           break;
         case "resume":
           resume(session);
@@ -76,82 +77,43 @@ public class PlayerHandler extends TextWebSocketHandler {
   }
 
   // This gets called only the first time a room is registered
-  private void start(final WebSocketSession session, JsonObject jsonMessage) {
-    final UserSession user = new UserSession(session);
+  // The user that calls it first is the one that becomes admin
+  private void createRoom(final WebSocketSession session, JsonObject jsonMessage) {
+    JsonElement nickJ = jsonMessage.get("nickname");
+    String nick = "admin";
 
-    String videourl = jsonMessage.get("videourl").getAsString();
-    
-    String uuid = UUID.randomUUID().toString();
-    StreamingRoom stream = new StreamingRoom(kurento, user, videourl);
+    if (nickJ != null) {
+      nick = nickJ.getAsString();
+    }
 
-    System.out.println("code uuid " + uuid);
+    final UserSession user = new UserSession(session, nick);
+
+    String videoURL = jsonMessage.get("videourl").getAsString();
+
+    StreamingRoom stream = new StreamingRoom(kurento, user, videoURL);
+
+    String uuid = stream.getUUID();
 
     rooms.put(uuid, stream);
-
-    log.info("Codice:\n{}", uuid);
     users.put(session.getId(), user);
 
-    // 2. WebRtcEndpoint
-    // ICE candidates
-    user.getWebRtcEndpoint().addIceCandidateFoundListener(event -> {
-      JsonObject response = new JsonObject();
-      response.addProperty("id", "iceCandidate");
-      response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
-      try {
-        synchronized (session) {
-          session.sendMessage(new TextMessage(response.toString()));
-        }
-      } catch (IOException e) {
-        log.debug(e.getMessage());
-      }
-    });
+    if (jsonMessage.get("sdpOffer") == null) {
+      sendError(session, "Empty sdpOffer, cannot proceed");
+      return;
+    }
 
-    // Continue the SDP Negotiation: Generate an SDP Answer
-    String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
-    String sdpAnswer = user.getWebRtcEndpoint().processOffer(sdpOffer);
-
-    log.info("[Handler::start] SDP Offer from browser to KMS:\n{}", sdpOffer);
-    log.info("[Handler::start] SDP Answer from KMS to browser:\n{}", sdpAnswer);
-
-    JsonObject response = new JsonObject();
-    response.addProperty("id", "startResponse");
-    response.addProperty("sdpAnswer", sdpAnswer);
-
-    sendMessage(session, response.toString());
-
-    user.getWebRtcEndpoint().addMediaStateChangedListener(event -> {
-
-      if (event.getNewState() == MediaState.CONNECTED) {
-        VideoInfo videoInfo = stream.getPlayerEndpoint().getVideoInfo();
-
-        JsonObject response1 = new JsonObject();
-        response1.addProperty("id", "videoInfo");
-        response1.addProperty("isSeekable", videoInfo.getIsSeekable());
-        response1.addProperty("initSeekable", videoInfo.getSeekableInit());
-        response1.addProperty("endSeekable", videoInfo.getSeekableEnd());
-        response1.addProperty("videoDuration", videoInfo.getDuration());
-        sendMessage(session, response1.toString());
-      }
-    });
-
-    user.getWebRtcEndpoint().gatherCandidates();
-
-    // 3. PlayEndpoint
-    stream.getPlayerEndpoint().addErrorListener(event -> {
-      log.info("ErrorEvent: {}", event.getDescription());
-      sendPlayEnd(session);
-    });
-
-    stream.getPlayerEndpoint().addEndOfStreamListener(event -> {
-      log.info("EndOfStreamEvent: {}", event.getTimestamp());
-      sendPlayEnd(session);
-    });
-
-    stream.getPlayerEndpoint().play();
+    setupWebRTC(user, stream, jsonMessage.get("sdpOffer").getAsString());
   }
   
-  private void registerToRoom(final WebSocketSession session, JsonObject jsonMessage) {
-    final UserSession user = new UserSession(session);
+  private void joinRoom(final WebSocketSession session, JsonObject jsonMessage) {
+    JsonElement nick = jsonMessage.get("nickname");
+
+    if (nick == null) {
+      sendError(session, "Error, you have to set a nickname before joining the room");
+      return;
+    }
+
+    final UserSession user = new UserSession(session, nick.getAsString());
 
     String room = jsonMessage.get("roomid").getAsString();
 
@@ -165,8 +127,18 @@ public class PlayerHandler extends TextWebSocketHandler {
 
     users.put(session.getId(), user);
 
+    if (jsonMessage.get("sdpOffer") == null) {
+      sendError(session, "Empty sdpOffer, cannot proceed");
+      return;
+    }
+
+    setupWebRTC(user, stream, jsonMessage.get("sdpOffer").getAsString());
+  }
+
+  private void setupWebRTC(final UserSession user, final StreamingRoom stream, final String sdpOffer) {
     // 2. WebRtcEndpoint
     // ICE candidates
+    WebSocketSession session = user.getWs();
     user.getWebRtcEndpoint().addIceCandidateFoundListener(event -> {
       JsonObject response = new JsonObject();
       response.addProperty("id", "iceCandidate");
@@ -181,7 +153,6 @@ public class PlayerHandler extends TextWebSocketHandler {
     });
 
     // Continue the SDP Negotiation: Generate an SDP Answer
-    String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
     String sdpAnswer = user.getWebRtcEndpoint().processOffer(sdpOffer);
 
     log.info("[Handler::start] SDP Offer from browser to KMS:\n{}", sdpOffer);
@@ -263,29 +234,6 @@ public class PlayerHandler extends TextWebSocketHandler {
       System.out.println("pppp " + user.getHubPort().isMediaTranscoding(MediaType.VIDEO));
     }
   }
-//  private void debugDot(final WebSocketSession session) {
-//    UserSession user = users.get(session.getId());
-//
-//    if (user != null) {
-//      final String pipelineDot = user.getMediaPipeline().getGstreamerDot();
-//      try (PrintWriter out = new PrintWriter("player.dot")) {
-//        out.println(pipelineDot);
-//      } catch (IOException ex) {
-//        log.error("[Handler::debugDot] Exception: {}", ex.getMessage());
-//      }
-//      final String playerDot = user.getPlayerEndpoint().getElementGstreamerDot();
-//      try (PrintWriter out = new PrintWriter("player-decoder.dot")) {
-//        out.println(playerDot);
-//      } catch (IOException ex) {
-//        log.error("[Handler::debugDot] Exception: {}", ex.getMessage());
-//      }
-//    }
-//
-//    ServerManager sm = kurento.getServerManager();
-//    log.warn("[Handler::debugDot] CPU COUNT: {}", sm.getCpuCount());
-//    log.warn("[Handler::debugDot] CPU USAGE: {}", sm.getUsedCpu(1000));
-//    log.warn("[Handler::debugDot] RAM USAGE: {}", sm.getUsedMemory());
-//  }
 
   private void doSeek(final WebSocketSession session, JsonObject jsonMessage) {
     UserSession user = users.get(session.getId());

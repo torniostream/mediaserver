@@ -4,7 +4,7 @@ import com.google.gson.JsonObject;
 import org.kurento.client.*;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
-
+import java.util.UUID;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -18,11 +18,14 @@ public class StreamingRoom {
     private UserSession admin;
     private List<UserSession> safeList = Collections.synchronizedList(new ArrayList<>());
 
+    private final String uuid;
 
     public StreamingRoom(final KurentoClient kurento, final UserSession userAdmin, final String mediaUri) {
+        uuid = UUID.randomUUID().toString();
+        
         mediaPipeline = kurento.createMediaPipeline();
         roomDispatcher = new DispatcherOneToMany.Builder(mediaPipeline).build();
-        playerEndpoint = new PlayerEndpoint.Builder(mediaPipeline, mediaUri).useEncodedMedia().build();
+        playerEndpoint = new PlayerEndpoint.Builder(mediaPipeline, mediaUri).build();
 
         HubPort playerHub = new HubPort.Builder(roomDispatcher).build();
         playerEndpoint.connect(playerHub);
@@ -32,6 +35,50 @@ public class StreamingRoom {
         addUser(userAdmin);
 
         roomDispatcher.setSource(playerHub);
+    }
+    
+    public String getUUID() {
+        return this.uuid;
+    }
+
+    private void notifyUsersNewEntry(final UserSession user) {
+        for (final UserSession us: safeList) {
+            // Notify other users
+            JsonObject response = new JsonObject();
+            response.addProperty("id", "newUser");
+
+            JsonObject u = new JsonObject();
+            u.addProperty("username", user.getNick());
+
+            response.add("user", u);
+            sendMessage(us.getWs(), response.toString());
+        }
+    }
+
+    private void notifyUsersExit(final UserSession user) {
+        for (final UserSession us: safeList) {
+            // Notify other users
+            JsonObject response = new JsonObject();
+            response.addProperty("id", "userLeft");
+
+            JsonObject u = new JsonObject();
+            u.addProperty("username", user.getNick());
+
+            response.add("user", u);
+            sendMessage(us.getWs(), response.toString());
+        }
+    }
+
+    private void meetTheOtherUsers(final UserSession user) {
+        for (final UserSession us: safeList) {
+            JsonObject response = new JsonObject();
+            response.addProperty("id", "newUser");
+            JsonObject u = new JsonObject();
+            u.addProperty("username", user.getNick());
+
+            response.add("user", u);
+            sendMessage(user.getWs(), response.toString());
+        }
     }
     
     public boolean addUser(final UserSession user) {
@@ -46,6 +93,13 @@ public class StreamingRoom {
         hubPort.setMaxOutputBitrate(20000000);
         //hubPort.setMinOutputBitrate(800000);
         hubPort.connect(webRtcEpUser);
+
+        // Make the users meet
+        notifyUsersNewEntry(user);
+        meetTheOtherUsers(user);
+
+        // Send back the UUID
+        sendUUID(user.getWs());
         
         user.setRoom(this);
         return safeList.add(user);
@@ -67,6 +121,8 @@ public class StreamingRoom {
         if (safeList.isEmpty()) {
             mediaPipeline.release();
         }
+
+        notifyUsersExit(user);
         
         return true;
     }
@@ -98,6 +154,13 @@ public class StreamingRoom {
     private void sendResume(WebSocketSession session) {
         JsonObject response = new JsonObject();
         response.addProperty("id", "resumed");
+        sendMessage(session, response.toString());
+    }
+
+    private void sendUUID(WebSocketSession session) {
+        JsonObject response = new JsonObject();
+        response.addProperty("id", "uuid");
+        response.addProperty("uuid", this.getUUID());
         sendMessage(session, response.toString());
     }
 

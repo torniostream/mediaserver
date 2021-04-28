@@ -9,9 +9,15 @@ public class UserSession {
   private StreamingRoom room;
   private WebSocketSession ws;
   private HubPort hubPort;
-
-  public UserSession(final WebSocketSession ws) {
+  private String nick;
+  
+  public UserSession(final WebSocketSession ws, final String nick) {
     this.ws = ws;
+    this.nick = nick;
+  }
+  
+  public String getNick() {
+    return this.nick;
   }
 
   public WebRtcEndpoint getWebRtcEndpoint() {
