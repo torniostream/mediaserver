@@ -5,20 +5,65 @@ import org.springframework.web.socket.WebSocketSession;
 
 public class UserSession {
 
-  private WebRtcEndpoint webRtcEndpoint;
-  private StreamingRoom room;
-  private WebSocketSession ws;
-  private HubPort hubPort;
-  private String nick;
+  private transient WebRtcEndpoint webRtcEndpoint;
+  private transient StreamingRoom room;
+  private transient WebSocketSession ws;
+  private transient HubPort hubPort;
+  private String nickname;
+  private Boolean isAdmin = false;
+  private Avatar avatar = new Avatar();
+
+  private class Avatar {
+    private Integer id;
+    private String path;
+  }
+
+  public Integer getAvatarId() {
+    return avatar.id;
+  }
+
+  public String getAvatarPath() {
+    return avatar.path;
+  }
+
+  public Boolean getInhibited() {
+    return inhibited;
+  }
+
+  public void setInhibited(final Boolean inhibited) {
+    this.inhibited = inhibited;
+  }
+
+  private Boolean inhibited = false;
   
   public UserSession(final WebSocketSession ws, final String nick) {
     this.ws = ws;
-    this.nick = nick;
+    this.nickname = nick;
   }
   
   public String getNick() {
-    return this.nick;
+    return this.nickname;
   }
+
+  public Boolean validate() {
+    if (this.ws == null) {
+      return false;
+    }
+
+    if (this.nickname == null || this.nickname.equals("")) {
+      return false;
+    }
+
+    if (this.avatar == null || this.avatar.id == null || this.avatar.id == 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  public Boolean isAdmin() { return isAdmin; }
+
+  public void setIsAdmin(final Boolean isAdmin) { this.isAdmin = isAdmin; }
 
   public WebRtcEndpoint getWebRtcEndpoint() {
     return webRtcEndpoint;

@@ -1,5 +1,7 @@
 package org.kurento.tutorial.player;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.kurento.client.*;
 import org.springframework.web.socket.TextMessage;
@@ -11,9 +13,9 @@ import java.util.Collections;
 import java.util.List;
 
 public class StreamingRoom {
-    private DispatcherOneToMany roomDispatcher;
-    private MediaPipeline mediaPipeline;
-    private PlayerEndpoint playerEndpoint;
+    private transient DispatcherOneToMany roomDispatcher;
+    private transient MediaPipeline mediaPipeline;
+    private transient PlayerEndpoint playerEndpoint;
 
     private UserSession admin;
     private List<UserSession> safeList = Collections.synchronizedList(new ArrayList<>());
@@ -43,40 +45,49 @@ public class StreamingRoom {
 
     private void notifyUsersNewEntry(final UserSession user) {
         for (final UserSession us: safeList) {
+            if (us == user) {
+                continue;
+            }
             // Notify other users
             JsonObject response = new JsonObject();
             response.addProperty("id", "newUser");
 
-            JsonObject u = new JsonObject();
-            u.addProperty("username", user.getNick());
+            Gson gson = new Gson();
+            JsonElement who = gson.toJsonTree(user);
 
-            response.add("user", u);
+            response.add("user", who);
             sendMessage(us.getWs(), response.toString());
         }
     }
 
     private void notifyUsersExit(final UserSession user) {
         for (final UserSession us: safeList) {
+            if (us == user) {
+                continue;
+            }
             // Notify other users
             JsonObject response = new JsonObject();
             response.addProperty("id", "userLeft");
 
-            JsonObject u = new JsonObject();
-            u.addProperty("username", user.getNick());
+            Gson gson = new Gson();
+            JsonElement who = gson.toJsonTree(user);
 
-            response.add("user", u);
+            response.add("user", who);
             sendMessage(us.getWs(), response.toString());
         }
     }
 
     private void meetTheOtherUsers(final UserSession user) {
         for (final UserSession us: safeList) {
+            if (us == user) {
+                continue;
+            }
             JsonObject response = new JsonObject();
             response.addProperty("id", "newUser");
-            JsonObject u = new JsonObject();
-            u.addProperty("username", user.getNick());
+            Gson gson = new Gson();
+            JsonElement who = gson.toJsonTree(user);
 
-            response.add("user", u);
+            response.add("user", who);
             sendMessage(user.getWs(), response.toString());
         }
     }
@@ -131,29 +142,44 @@ public class StreamingRoom {
         return playerEndpoint;
     }
     
-    public void pause() {
+    public void pause(final UserSession initiator) {
         playerEndpoint.pause();
         for (final UserSession us: safeList) {
-            sendPause(us.getWs());
+            if (us == initiator) {
+                continue;
+            }
+            sendPause(us.getWs(), initiator);
         }
     }
     
-    public void resume() {
+    public void resume(final UserSession initiator) {
         playerEndpoint.play();
         for (final UserSession us: safeList) {
-            sendResume(us.getWs());
+            if (us == initiator) {
+                continue;
+            }
+            sendResume(us.getWs(), initiator);
         }
     }
 
-    private void sendPause(WebSocketSession session) {
+    private void sendPause(WebSocketSession session, final UserSession initiator) {
         JsonObject response = new JsonObject();
         response.addProperty("id", "paused");
+
+        Gson gson = new Gson();
+        JsonElement who = gson.toJsonTree(initiator);
+
+        response.add("initiator", who);
         sendMessage(session, response.toString());
     }
 
-    private void sendResume(WebSocketSession session) {
+    private void sendResume(WebSocketSession session, final UserSession initiator) {
         JsonObject response = new JsonObject();
         response.addProperty("id", "resumed");
+        Gson gson = new Gson();
+        JsonElement who = gson.toJsonTree(initiator);
+
+        response.add("initiator", who);
         sendMessage(session, response.toString());
     }
 

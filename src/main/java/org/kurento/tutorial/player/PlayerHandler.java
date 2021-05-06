@@ -54,6 +54,12 @@ public class PlayerHandler extends TextWebSocketHandler {
         case "resume":
           resume(session);
           break;
+        case "inhibit":
+          inhibit(session, jsonMessage, true);
+          break;
+        case "uninhibit":
+          inhibit(session, jsonMessage, false);
+          break;
         case "debugDot":
           debugDot(session);
           break;
@@ -76,17 +82,43 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
+  // An admin can inhibit a user from controlling the movie: e.g. if they have been
+  // repeatedly misbehaving.
+  private void inhibit(final WebSocketSession session, final JsonObject jsonMessage, final Boolean inhibit) {
+    UserSession user = this.users.get(session);
+    if (user == null) {
+      return;
+    }
+
+    if (!user.isAdmin()) {
+      sendError(session, "You're not authorized to inhibit another user because you're not a room administrator.");
+      return;
+    }
+
+    user.setInhibited(inhibit);
+  }
+
   // This gets called only the first time a room is registered
   // The user that calls it first is the one that becomes admin
   private void createRoom(final WebSocketSession session, JsonObject jsonMessage) {
-    JsonElement nickJ = jsonMessage.get("nickname");
-    String nick = "admin";
+    JsonElement usr = jsonMessage.get("user");
 
-    if (nickJ != null) {
-      nick = nickJ.getAsString();
+    if (usr == null) {
+      sendError(session, "Error, you have to set a nickname before creating the room");
+      return;
     }
 
-    final UserSession user = new UserSession(session, nick);
+    Gson gson = new Gson();
+    final UserSession user = gson.fromJson(usr, UserSession.class);
+
+    user.setIsAdmin(true);
+    user.setInhibited(false);
+    user.setWs(session);
+
+    if (!user.validate()) {
+      sendError(session, "There was an error deserializing your user information.");
+      return;
+    }
 
     String videoURL = jsonMessage.get("videourl").getAsString();
 
@@ -106,14 +138,24 @@ public class PlayerHandler extends TextWebSocketHandler {
   }
   
   private void joinRoom(final WebSocketSession session, JsonObject jsonMessage) {
-    JsonElement nick = jsonMessage.get("nickname");
+    JsonElement usr = jsonMessage.get("user");
 
-    if (nick == null) {
-      sendError(session, "Error, you have to set a nickname before joining the room");
+    if (usr == null) {
+      sendError(session, "Error, you have to set a nickname before creating the room");
       return;
     }
 
-    final UserSession user = new UserSession(session, nick.getAsString());
+    Gson gson = new Gson();
+    final UserSession user = gson.fromJson(usr, UserSession.class);
+
+    user.setIsAdmin(true);
+    user.setInhibited(false);
+    user.setWs(session);
+
+    if (!user.validate()) {
+      sendError(session, "There was an error deserializing your user information.");
+      return;
+    }
 
     String room = jsonMessage.get("roomid").getAsString();
 
@@ -121,8 +163,8 @@ public class PlayerHandler extends TextWebSocketHandler {
       sendError(session, "Error, room not found");
       return;
     }
-
     final StreamingRoom stream = rooms.get(room);
+
     stream.addUser(user);
 
     users.put(session.getId(), user);
@@ -195,27 +237,39 @@ public class PlayerHandler extends TextWebSocketHandler {
   private void pause(String sessionId) {
     UserSession user = users.get(sessionId);
 
-    if (user != null) {
-      user.getRoom().pause();
+    if (user == null) {
+      return;
     }
+
+    if (user.getInhibited()) {
+      sendError(user.getWs(), "You're inhibited, and you cannot perform this operation.");
+    }
+
+    user.getRoom().pause(user);
   }
 
   private void resume(final WebSocketSession session) {
     UserSession user = users.get(session.getId());
 
-    if (user != null) {
-      VideoInfo videoInfo = user.getRoom().getPlayerEndpoint().getVideoInfo();
-
-      JsonObject response = new JsonObject();
-      response.addProperty("id", "videoInfo");
-      response.addProperty("isSeekable", videoInfo.getIsSeekable());
-      response.addProperty("initSeekable", videoInfo.getSeekableInit());
-      response.addProperty("endSeekable", videoInfo.getSeekableEnd());
-      response.addProperty("videoDuration", videoInfo.getDuration());
-      sendMessage(session, response.toString());
-      
-      user.getRoom().resume();
+    if (user == null) {
+      return;
     }
+
+    if (user.getInhibited()) {
+      sendError(user.getWs(), "You're inhibited, and you cannot perform this operation.");
+    }
+
+    VideoInfo videoInfo = user.getRoom().getPlayerEndpoint().getVideoInfo();
+
+    JsonObject response = new JsonObject();
+    response.addProperty("id", "videoInfo");
+    response.addProperty("isSeekable", videoInfo.getIsSeekable());
+    response.addProperty("initSeekable", videoInfo.getSeekableInit());
+    response.addProperty("endSeekable", videoInfo.getSeekableEnd());
+    response.addProperty("videoDuration", videoInfo.getDuration());
+    sendMessage(session, response.toString());
+
+    user.getRoom().resume(user);
   }
 
   private void stop(String sessionId) {
