@@ -2,7 +2,7 @@ version: "3"
 services:
   backend:
     build: .
-    image: kriive/kurento-backend:latest
+    image: kriive/kurento-backend:6.15.0
     environment:
       - KMS_ADDR=172.17.0.1
       - KMS_PORT=8888

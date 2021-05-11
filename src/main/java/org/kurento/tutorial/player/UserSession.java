@@ -1,10 +1,12 @@
 package org.kurento.tutorial.player;
 
 import org.kurento.client.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.WebSocketSession;
 
 public class UserSession {
-
+  private static final Logger log = LoggerFactory.getLogger(UserSession.class);
   private transient WebRtcEndpoint webRtcEndpoint;
   private transient StreamingRoom room;
   private transient WebSocketSession ws;
