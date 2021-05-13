@@ -1,4 +1,4 @@
-FROM openjdk:16-jdk-alpine as builder
+FROM openjdk:13-alpine as builder
 # ----
 # Install Maven
 RUN apk add --no-cache curl tar bash
@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn dependency:resolve && mvn dependency
 COPY src /usr/src/app/src
 RUN --mount=type=cache,target=/root/.m2 mvn -T 1C install && rm -rf target && mvn -U package
 
-FROM openjdk:16-jdk-alpine
+FROM openjdk:13-alpine
 
 WORKDIR /root/
 RUN apk add --no-cache bash
