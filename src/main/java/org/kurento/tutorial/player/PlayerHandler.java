@@ -1,6 +1,7 @@
 package org.kurento.tutorial.player;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 
@@ -66,6 +67,9 @@ public class PlayerHandler extends TextWebSocketHandler {
         case "doSeek":
           doSeek(session, jsonMessage);
           break;
+        case "showParticipants":
+          requestParticipants(session, jsonMessage);
+          break;
         case "getPosition":
           getPosition(session);
           break;
@@ -82,10 +86,32 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
+  private void requestParticipants(final WebSocketSession session, final JsonObject jsonMessage) {
+    JsonElement room = jsonMessage.get("room");
+    if (room == null) {
+      sendError(session, "You need to specify target's room.");
+      return;
+    }
+
+    StreamingRoom r = rooms.get(room.getAsString());
+    if (r == null) {
+      sendError(session, "Room not found!");
+      return;
+    }
+
+    Gson gson = new Gson();
+    JsonElement userList = gson.toJsonTree(r.getUserList(), List.class);
+    
+    JsonObject response = new JsonObject();
+    response.addProperty("id", "responseParticipants");
+    response.add("users", userList);
+    sendMessage(session, response.toString());
+  }
+
   // An admin can inhibit a user from controlling the movie: e.g. if they have been
   // repeatedly misbehaving.
-  private synchronized void inhibit(final WebSocketSession session, final JsonObject jsonMessage, final Boolean inhibit) {
-    UserSession user = this.users.get(session);
+  private void inhibit(final WebSocketSession session, final JsonObject jsonMessage, final Boolean inhibit) {
+    UserSession user = this.users.get(session.getId());
     if (user == null) {
       sendError(session, "You're not registered.");
       return;
@@ -94,6 +120,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     JsonElement target = jsonMessage.get("target");
     if (target == null) {
       sendError(session, "You need to specify target's nickname.");
+      return;
     }
 
     user.getRoom().setInhibitUser(user, target.getAsString(), inhibit);
@@ -101,7 +128,7 @@ public class PlayerHandler extends TextWebSocketHandler {
 
   // This gets called only the first time a room is registered
   // The user that calls it first is the one that becomes admin
-  private synchronized void createRoom(final WebSocketSession session, JsonObject jsonMessage) {
+  private void createRoom(final WebSocketSession session, JsonObject jsonMessage) {
     JsonElement usr = jsonMessage.get("user");
 
     if (usr == null) {
@@ -121,7 +148,12 @@ public class PlayerHandler extends TextWebSocketHandler {
       return;
     }
 
-    String videoURL = jsonMessage.get("videourl").getAsString();
+    JsonElement videoURLJSON = jsonMessage.get("videourl");
+    if (videoURLJSON == null) {
+      sendError(session, "You didn't provide any videoURL.");
+    }
+
+    String videoURL = videoURLJSON.getAsString();
 
     StreamingRoom stream = new StreamingRoom(kurento, user, videoURL);
 
@@ -138,7 +170,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     setupWebRTC(user, stream, jsonMessage.get("sdpOffer").getAsString());
   }
   
-  private synchronized void joinRoom(final WebSocketSession session, JsonObject jsonMessage) {
+  private void joinRoom(final WebSocketSession session, JsonObject jsonMessage) {
     JsonElement usr = jsonMessage.get("user");
 
     if (usr == null) {
@@ -180,7 +212,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     setupWebRTC(user, stream, jsonMessage.get("sdpOffer").getAsString());
   }
 
-  private synchronized void setupWebRTC(final UserSession user, final StreamingRoom stream, final String sdpOffer) {
+  private void setupWebRTC(final UserSession user, final StreamingRoom stream, final String sdpOffer) {
     // 2. WebRtcEndpoint
     // ICE candidates
     WebSocketSession session = user.getWs();
@@ -237,7 +269,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     });
   }
 
-  private synchronized void pause(String sessionId) {
+  private void pause(String sessionId) {
     UserSession user = users.get(sessionId);
     if (user == null) {
       return;
@@ -246,7 +278,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     user.getRoom().pause(user);
   }
 
-  private synchronized void resume(final WebSocketSession session) {
+  private void resume(final WebSocketSession session) {
     UserSession user = users.get(session.getId());
     if (user == null) {
       return;
@@ -255,14 +287,14 @@ public class PlayerHandler extends TextWebSocketHandler {
     user.getRoom().resume(user);
   }
 
-  private synchronized void stop(String sessionId) {
+  private void stop(String sessionId) {
     UserSession user = users.remove(sessionId);
     if (user != null) {
       user.getRoom().removeUser(user);
     }
   }
 
-  private synchronized void debugDot(final WebSocketSession session) {
+  private void debugDot(final WebSocketSession session) {
     UserSession user = users.get(session.getId());
     if (user != null) {
       System.out.println("media trans" + user.getRoom().getPlayerEndpoint().isMediaTranscoding(MediaType.VIDEO));
@@ -271,7 +303,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
-  private synchronized void doSeek(final WebSocketSession session, JsonObject jsonMessage) {
+  private void doSeek(final WebSocketSession session, JsonObject jsonMessage) {
     UserSession user = users.get(session.getId());
 
     if (user != null) {
@@ -291,7 +323,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
-  private synchronized void getPosition(final WebSocketSession session) {
+  private void getPosition(final WebSocketSession session) {
     UserSession user = users.get(session.getId());
 
     if (user != null) {
@@ -304,7 +336,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
-  private synchronized void onIceCandidate(String sessionId, JsonObject jsonMessage) {
+  private void onIceCandidate(String sessionId, JsonObject jsonMessage) {
     UserSession user = users.get(sessionId);
 
     if (user != null) {
@@ -312,11 +344,11 @@ public class PlayerHandler extends TextWebSocketHandler {
       IceCandidate candidate =
           new IceCandidate(jsonCandidate.get("candidate").getAsString(), jsonCandidate
               .get("sdpMid").getAsString(), jsonCandidate.get("sdpMLineIndex").getAsInt());
-      user.getWebRtcEndpoint().addIceCandidate(candidate);
+      user.addCandidate(candidate);
     }
   }
 
-  public synchronized void sendPlayEnd(WebSocketSession session) {
+  public void sendPlayEnd(WebSocketSession session) {
     if (users.containsKey(session.getId())) {
       JsonObject response = new JsonObject();
       response.addProperty("id", "playEnd");
@@ -324,7 +356,7 @@ public class PlayerHandler extends TextWebSocketHandler {
     }
   }
 
-  private synchronized void sendError(WebSocketSession session, String message) {
+  private void sendError(WebSocketSession session, String message) {
     //if (users.containsKey(session.getId())) {
       JsonObject response = new JsonObject();
       response.addProperty("id", "error");

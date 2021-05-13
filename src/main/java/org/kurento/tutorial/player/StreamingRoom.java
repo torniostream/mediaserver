@@ -41,6 +41,10 @@ public class StreamingRoom {
 
         roomDispatcher.setSource(playerHub);
     }
+
+    public List<UserSession> getUserList() {
+        return Collections.unmodifiableList(this.safeList);
+    }
     
     public String getUUID() {
         return this.uuid;
@@ -50,8 +54,6 @@ public class StreamingRoom {
         for (UserSession us: safeList) {
             if (us.getNick().equals(username)) return us;
         }
-
-        System.out.println("Qui ci sono arrivato però.");
 
         return null;
     }
@@ -170,8 +172,16 @@ public class StreamingRoom {
         sendUUID(user.getWs());
         
         user.setRoom(this);
+        VideoInfo videoInfo = this.playerEndpoint.getVideoInfo();
 
-        System.out.println("Qui invece anche");
+        JsonObject response1 = new JsonObject();
+        response1.addProperty("id", "videoInfo");
+        response1.addProperty("isSeekable", videoInfo.getIsSeekable());
+        response1.addProperty("initSeekable", videoInfo.getSeekableInit());
+        response1.addProperty("endSeekable", videoInfo.getSeekableEnd());
+        response1.addProperty("videoDuration", videoInfo.getDuration());
+        sendMessage(user.getWs(), response1.toString());
+
         return safeList.add(user);
     }
     
@@ -194,7 +204,7 @@ public class StreamingRoom {
             mediaPipeline.release();
         }
 
-        if (this.admin.equals(user)) {
+        if (!safeList.isEmpty() && this.admin.equals(user)) {
             int randomIndex = ThreadLocalRandom.current().nextInt(this.safeList.size()) % this.safeList.size();
             setAdmin(this.safeList.get(randomIndex));
         }
@@ -329,7 +339,7 @@ public class StreamingRoom {
         }
     }
 
-    private synchronized void sendError(WebSocketSession session, String message) {
+    private void sendError(WebSocketSession session, String message) {
         JsonObject response = new JsonObject();
         response.addProperty("id", "error");
         response.addProperty("message", message);
