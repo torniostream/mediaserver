@@ -1,0 +1,16 @@
+version: "3"
+services:
+  backend:
+    build: .
+    image: kriive/kurento-backend:6.15.0
+    environment:
+      - KMS_ADDR=172.17.0.1
+      - KMS_PORT=8888
+    ports:
+      - "8082:8082"
+  mediaserver:
+    image: kurento/kurento-media-server:latest
+    volumes:
+      - ./movies:/movies:Z
+      - ./etc-kurento:/etc/kurento:Z
+    network_mode: "host"
